@@ -208,14 +208,16 @@ class I2C(object):
     CMD_PERIPHERALS = 0x40  # OR with 0xWXYZ (W=power, X=pullups, Y=AUX, Z=CS)
     CMD_SET_SPEED   = 0x60  # OR with I2C speed (3=~400kHz, 2=~100kHz, 1=~50kHz, 0=~5kHz)
 
-    def __init__(self, buspirate, speed = SPEED_5KHZ):
-        self._bp = buspirate
+    def __init__(self, buspirate, speed = SPEED_100KHZ):
+        self.bp = buspirate
         buspirate.set_mode(BP_Mode.i2c)
+        self.set_speed(speed)
 
     def set_speed(self, speed):
-        ret = self.write_byte(CMD_SET_SPEED | (speed & 0x03), True)
+        ret = self.bp.write_byte(I2C.CMD_SET_SPEED | (speed & 0x03), True)
         if ret != 0x01:
             raise BusPyrateError("I2C Set Speed failed: 0x%02X" % ret)
+        self.speed = speed
 
 if __name__ == "__main__":
     bp = BusPyrate(device = "/dev/ttyUSB0")
@@ -223,4 +225,5 @@ if __name__ == "__main__":
     print("Binary mode: %s" % BP_Mode.get_str(bp.bp_mode))
     i2c = I2C(bp)
     print("Binary mode: %s" % BP_Mode.get_str(bp.bp_mode))
+    print("I2C speed: 0x%02X" % i2c.speed)
     bp.reset()
