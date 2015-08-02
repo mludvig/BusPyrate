@@ -20,6 +20,9 @@ class BusPyrate(object):
     bp_firmware = None
     bp_bootloader = None
 
+    def __str__(self):
+        return "BusPirate %s (Firmware %d.%d)" % (self.bp_version, self.bp_firmware / 100, self.bp_firmware % 100)
+
     def __init__(self, device, speed = 115200, binmode = True):
         self._ser = serial.Serial(port = device, baudrate = speed)
 
@@ -38,11 +41,15 @@ class BusPyrate(object):
         if not bp_ok:
             raise BusPyrateError("BusPirate is in unknown state. Reset it and try again.")
 
-        # Now it should be quicker
-        self._ser.setTimeout(0.2)
-
         # Reset to a known state
+        self.reset_from_textmode()
+
+    def reset_from_textmode(self):
         self._ser.write(b"#\n")
+        self.reset_parse()
+
+    def reset_parse(self):
+        self._ser.setTimeout(0.2)
         while True:
             buf = self._ser.readline().decode('ascii').strip()
 
@@ -60,12 +67,10 @@ class BusPyrate(object):
             if buf.endswith("HiZ>"):
                 break
 
-        print("Detected BusPirate %s (firmware %d.%d)" % (self.bp_version, self.bp_firmware / 100, self.bp_firmware % 100))
-        self._ser.close()
-
 if __name__ == "__main__":
     try:
         bp = BusPyrate(device = "/dev/ttyUSB0")
+        print(bp)
     except Exception as e:
         sys.stderr.write(str(e) + "\n")
         sys.exit(1)
