@@ -11,10 +11,14 @@
 import re
 import sys
 import serial
+import time
 
 def debug(message):
-    #print(message.strip())
+    #print("# " + message.strip())
     pass
+
+def hexdump(string, delimiter=" "):
+    return delimiter.join([hex(ch) for ch in string])
 
 class BusPyrateError(Exception):
     def __str__(self):
@@ -79,7 +83,7 @@ class BusPyrate(object):
         while tries:
             # Test BinMode
             self._ser.sendBreak()
-            buf = self._ser.readall().decode('ascii')
+            buf = self.read_all()
             if buf.count("BBIO1") > 0:
                 self.bp_mode = BP_Mode.bbio
                 break
@@ -87,7 +91,7 @@ class BusPyrate(object):
             # Test TextMode
             self._ser.write(b"\r\n")
             self._ser.flush()
-            buf = self._ser.readall().decode('ascii')
+            buf = self.read_all()
             if buf.endswith(">"):
                 self.bp_mode = BP_Mode.text
                 break
@@ -108,7 +112,7 @@ class BusPyrate(object):
             self._reset_from_binmode()
 
     def _reset_from_binmode(self):
-        self.write_bytes([BP_Mode.CMD_BBIO, self.CMD_RESET])
+        self.write_bytes([BP_Mode.CMD_BBIO, self.CMD_RESET], read_response = False)
         self._reset_parse()
 
     def _reset_from_textmode(self):
@@ -118,7 +122,7 @@ class BusPyrate(object):
     def _reset_parse(self):
         self._ser.setTimeout(0.2)
         while True:
-            buf = self._ser.readline().decode('ascii').strip()
+            buf = self._ser.readline().decode('ascii', errors='replace').strip()
 
             # Bus Pirate v3
             m = re.match("Bus Pirate (v.*)", buf)
@@ -137,8 +141,8 @@ class BusPyrate(object):
     def enter_binmode(self):
         tries = 20
         while tries:
-            self.write_bytes([BP_Mode.CMD_BBIO, BP_Mode.CMD_BBIO])
-            buf = self._ser.readall().decode('ascii')
+            self.write_bytes([BP_Mode.CMD_BBIO, BP_Mode.CMD_BBIO], read_response = False)
+            buf = self.read_all()
             if buf.count("BBIO1") > 0:
                 self._ser.setTimeout(0.1)
                 self.bp_mode = BP_Mode.bbio
@@ -149,31 +153,45 @@ class BusPyrate(object):
     def get_serial(self):
         return self._ser
 
-    def write_byte(self, byte_, read_response = False):
+    def write_byte(self, byte_, read_response = True):
+        """
+        Write one byte and (optionally) read the response
+        """
+        ret = self.write_bytes([byte_], read_response)
         if read_response:
-            self._ser.readall()
-        self.write_bytes([byte_])
-        if read_response:
-            return self.read_byte()
+            return ret[0]
 
-    def write_bytes(self, bytes_):
-        debug("write_bytes(%r)" % bytes_)
-        self._ser.write(bytes(bytes_))
-        self._ser.flush()
+    def write_bytes(self, bytes_, read_response = True):
+        ret = []
+        for byte in bytes_:
+            self._ser.write(bytes([byte]))
+            self._ser.flush()
+            if read_response:
+                ret.append(ord(self._ser.read(1)))
+        debug("write_bytes([%s], %s): %s" % (hexdump(bytes_), read_response, hexdump(ret)))
+        return ret
 
     def read_byte(self):
         ret = self._ser.read(1)
         debug("read_byte(): %r" % ret)
-        return int.from_bytes(ret, byteorder = "little")
+        return ord(ret)
+
+    def read_all(self, decode = True):
+        buf = self._ser.readall()
+        if decode:
+            buf = buf.decode('ascii', errors='replace')
+        return buf
 
     def verify_mode(self, mode = None):
         if not mode:
             mode = self.bp_mode
-        # Flush input
-        self._ser.readall()
 
-        self.write_byte(self.CMD_GET_MODE)
-        buf = self._ser.readall().decode('ascii')
+        # Flush input
+        self.read_all()
+
+        self.write_byte(self.CMD_GET_MODE, read_response = False)
+        buf = self.read_all()
+
         wanted = BP_Mode.get_str(mode)
         debug("verify_mode(): buf=%r, wanted=%r" % (buf, wanted))
         return buf.endswith(wanted)
@@ -184,8 +202,8 @@ class BusPyrate(object):
 
         if self.bp_mode != mode:
             # Return to BBIO
-            self.write_byte(BP_Mode.CMD_BBIO, True)
-            self.write_byte(BP_Mode.get_cmd(mode), True)
+            self.write_byte(BP_Mode.CMD_BBIO)
+            self.write_byte(BP_Mode.get_cmd(mode))
             if self.verify_mode(mode):
                 self.bp_mode = mode
 
@@ -196,34 +214,79 @@ class I2C(object):
     SPEED_100KHZ    = 0b10
     SPEED_400KHZ    = 0b11
 
-    CMD_I2C_VERSION = 0x01
-    CMD_START_BIT   = 0x02
-    CMD_STOP_BIT    = 0x03
+    CMD_START       = 0x02
+    CMD_STOP        = 0x03
     CMD_READ_BYTE   = 0x04
     CMD_SEND_ACK    = 0x06
     CMD_SEND_NACK   = 0x07
-    CMD_BUS_SNIFFER = 0x0F  # Not implemented here
 
     CMD_WRITE_BYTES = 0x10  # OR with data length (0x0 = 1 Byte, 0xF = 16 bytes)
     CMD_PERIPHERALS = 0x40  # OR with 0xWXYZ (W=power, X=pullups, Y=AUX, Z=CS)
     CMD_SET_SPEED   = 0x60  # OR with I2C speed (3=~400kHz, 2=~100kHz, 1=~50kHz, 0=~5kHz)
 
-    def __init__(self, buspirate, speed = SPEED_100KHZ):
+    def __init__(self, buspirate, speed = SPEED_100KHZ, power_on = False):
         self.bp = buspirate
         buspirate.set_mode(BP_Mode.i2c)
         self.set_speed(speed)
+        self.set_power_on(power_on)
 
     def set_speed(self, speed):
-        ret = self.bp.write_byte(I2C.CMD_SET_SPEED | (speed & 0x03), True)
-        if ret != 0x01:
-            raise BusPyrateError("I2C Set Speed failed: 0x%02X" % ret)
+        if self.bp.write_byte(I2C.CMD_SET_SPEED | (speed & 0x03)) != 0x01:
+            raise BusPyrateError("I2C Set Speed failed")
         self.speed = speed
 
+    def set_power_on(self, power_on):
+        #if self.bp.write_byte(I2C.CMD_PERIPHERALS | (int(power_on)<<3 | 1<<2)) != 0x01:
+        if self.bp.write_byte(I2C.CMD_PERIPHERALS | (int(power_on)<<3)) != 0x01:
+            raise BusPyrateError("I2C Set Power failed")
+        self.power_on = power_on
+
+    def send_bytes(self, bytes_ = [], start = True, stop = True):
+        buf = ""
+        if start:
+            self.bp.write_byte(I2C.CMD_START)
+
+        if len(bytes_):
+            assert(type(bytes_) == type([]))
+            assert(len(bytes_) <= 16)
+            buf = self.bp.write_bytes([ I2C.CMD_WRITE_BYTES | (len(bytes_) - 1) ] + bytes_)
+            # Strip off confirmation of the length byte
+            buf = buf[1:]
+        if stop:
+            self.bp.write_byte(I2C.CMD_STOP)
+        return buf
+
+    def scan_bus(self, min_addr = 0x08, max_addr = 0x77):
+        """
+        scan_bus(min_addr = 0x08, max_addr = 0x77)
+
+        Scan I2C bus and return addresses of devices found.
+
+        Addresses 0x00~0x07 and 0x78~0x7F are reserved.
+
+        Note that I2C address is shifted left by one bit
+        in the address byte and last bit determines R/W,
+        hence for example I2C address 0x3C appears
+        as 0x78 on the wire and in the debug output
+        (0x3F << 1 = 0x7E).
+        """
+        devices = []
+        for addr in range(min_addr, max_addr + 1):
+            if self.send_bytes([addr << 1])[0] == 0x00:
+                devices.append(addr)
+        return devices
+
 if __name__ == "__main__":
-    bp = BusPyrate(device = "/dev/ttyUSB0")
+    tty_device = "/dev/ttyUSB0"
+    print("Initialising BusPirate on %s..." % tty_device)
+    bp = BusPyrate(device = tty_device)
     print(bp)
     print("Binary mode: %s" % BP_Mode.get_str(bp.bp_mode))
-    i2c = I2C(bp)
+    i2c = I2C(bp, power_on = True)
     print("Binary mode: %s" % BP_Mode.get_str(bp.bp_mode))
     print("I2C speed: 0x%02X" % i2c.speed)
+    print("Power On: %s" % i2c.power_on)
+    print("Scanning I2C bus...")
+    devices = i2c.scan_bus()
+    print("Found I2C devices: %s" % (devices and hexdump(devices) or "None"))
     bp.reset()
