@@ -126,7 +126,7 @@ class BusPyrate(object):
                 self.bp_version = m.group(1)
 
             # Firmware v4.2 Bootloader v4.1
-            m = re.match("Firmware v(\d+)\.(\d+) Bootloader v(\d+)\.(\d+)", buf)
+            m = re.match("Firmware v(\d+)\.(\d+).*Bootloader v(\d+)\.(\d+)", buf)
             if m:
                 self.bp_firmware = 100 * int(m.group(1)) + int(m.group(2))
                 self.bp_bootloader = 100 * int(m.group(3)) + int(m.group(4))
