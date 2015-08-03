@@ -244,15 +244,19 @@ class I2C(object):
             raise BusPyrateError("I2C Set Power failed")
         self.power_on = power_on
 
-    def send_bytes(self, bytes_ = [], start = True, stop = True):
+    def send_bytes(self, address = None, data = [], start = True, stop = True):
         buf = ""
         if start:
             self.bp.write_byte(I2C.CMD_START)
 
-        if len(bytes_):
-            assert(type(bytes_) == type([]))
-            assert(len(bytes_) <= 16)
-            buf = self.bp.write_bytes([ I2C.CMD_WRITE_BYTES | (len(bytes_) - 1) ] + bytes_)
+        assert(type(data) == type([]))
+        if address is not None:
+            # Copy to a new 'data' object, do not modify the original
+            data = [ address << 1 ] + data
+
+        if len(data):
+            assert(len(data) <= 16)
+            buf = self.bp.write_bytes([ I2C.CMD_WRITE_BYTES | (len(data) - 1) ] + data)
             # Strip off confirmation of the length byte
             buf = buf[1:]
         if stop:
@@ -275,7 +279,7 @@ class I2C(object):
         """
         devices = []
         for addr in range(min_addr, max_addr + 1):
-            if self.send_bytes([addr << 1])[0] == 0x00:
+            if self.send_bytes(address = addr)[0] == 0x00:
                 devices.append(addr)
         return devices
 
