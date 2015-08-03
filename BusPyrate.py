@@ -150,6 +150,9 @@ class BusPyrate(object):
             tries -= 1
         raise BusPyrateError("Unable to enter binary mode.")
 
+    def get_mode(self):
+        return BP_Mode.get_str(self.bp_mode)
+
     def get_serial(self):
         return self._ser
 
@@ -281,9 +284,9 @@ if __name__ == "__main__":
     print("Initialising BusPirate on %s..." % tty_device)
     bp = BusPyrate(device = tty_device)
     print(bp)
-    print("Binary mode: %s" % BP_Mode.get_str(bp.bp_mode))
+    print("Binary mode: %s" % bp.get_mode())
     i2c = I2C(bp, power_on = True)
-    print("Binary mode: %s" % BP_Mode.get_str(bp.bp_mode))
+    print("Binary mode: %s" % bp.get_mode())
     print("I2C speed: 0x%02X" % i2c.speed)
     print("Power On: %s" % i2c.power_on)
     print("Scanning I2C bus...")
