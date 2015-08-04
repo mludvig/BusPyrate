@@ -227,11 +227,14 @@ class I2C(object):
     CMD_PERIPHERALS = 0x40  # OR with 0xWXYZ (W=power, X=pullups, Y=AUX, Z=CS)
     CMD_SET_SPEED   = 0x60  # OR with I2C speed (3=~400kHz, 2=~100kHz, 1=~50kHz, 0=~5kHz)
 
-    def __init__(self, buspirate, speed = SPEED_100KHZ, power_on = False):
+    def __init__(self, buspirate, speed = SPEED_400KHZ, power_on = False):
         self.bp = buspirate
         buspirate.set_mode(BP_Mode.i2c)
         self.set_speed(speed)
         self.set_power_on(power_on)
+
+    def close(self):
+        self.bp.reset()
 
     def set_speed(self, speed):
         if self.bp.write_byte(I2C.CMD_SET_SPEED | (speed & 0x03)) != 0x01:
