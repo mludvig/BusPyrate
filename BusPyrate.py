@@ -222,6 +222,7 @@ class I2C(object):
     CMD_READ_BYTE   = 0x04
     CMD_SEND_ACK    = 0x06
     CMD_SEND_NACK   = 0x07
+    CMD_WR_BULK     = 0x08
 
     CMD_WRITE_BYTES = 0x10  # OR with data length (0x0 = 1 Byte, 0xF = 16 bytes)
     CMD_PERIPHERALS = 0x40  # OR with 0xWXYZ (W=power, X=pullups, Y=AUX, Z=CS)
@@ -255,27 +256,40 @@ class I2C(object):
 
         assert(type(data) == type([]))
 
-        if start:
-            self.bp.write_byte(I2C.CMD_START)
-
         if address is not None:
-            data = [ address << 1 ] + data
+            data.insert(0, address << 1)
 
-        while len(data):
+        if len(data) > 16 and len(data) <= 4096 and start and stop:
             # If both START and STOP are True (default) and len(data) > 16
-            # -> use bulk transfer (BP command CMD_READ_WRITE_BULK)
+            # -> use bulk transfer (max 4096 bytes at a time)
+            print("send_bytes_bulk(%d)" % len(data))
+            cmd = [ I2C.CMD_WR_BULK ]
+            cmd.append((len(data) & 0xFF00) >> 8)   # Write length - MSB
+            cmd.append((len(data) & 0x00FF))        # Write length - LSB
+            cmd.append(0)                           # Read length - MSB
+            cmd.append(0)                           # Read length - LSB
+            self.bp.write_bytes(cmd + data, read_response = False)
+            ret = self.bp.read_byte()
+            if ret != 0x01:
+                raise BusPyrateError("I2C Write/Read Bulk failed - too old BP firmware?")
+            ret = self.bp.read_all()
+        else:
             # Else do it manually in max 16-Byte chunks
             # -> BP CMD_WRITE_BYTES
+            if start:
+                self.bp.write_byte(I2C.CMD_START)
 
-            data_chunk = data[:16]
-            del(data[:16])
+            while len(data):
 
-            buf = self.bp.write_bytes([ I2C.CMD_WRITE_BYTES | (len(data_chunk) - 1) ] + data_chunk)
-            # Strip off confirmation of the length byte
-            ret += buf[1:]
+                data_chunk = data[:16]
+                del(data[:16])
 
-        if stop:
-            self.bp.write_byte(I2C.CMD_STOP)
+                buf = self.bp.write_bytes([ I2C.CMD_WRITE_BYTES | (len(data_chunk) - 1) ] + data_chunk)
+                # Strip off confirmation of the length byte
+                ret += buf[1:]
+
+            if stop:
+                self.bp.write_byte(I2C.CMD_STOP)
 
         return ret
 
