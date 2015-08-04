@@ -248,23 +248,36 @@ class I2C(object):
         self.power_on = power_on
 
     def send_bytes(self, address = None, data = [], start = True, stop = True):
-        buf = ""
+        # Copy to a new 'data' object, do not modify the original
+        data = data.copy()
+        # Return values
+        ret = []
+
+        assert(type(data) == type([]))
+
         if start:
             self.bp.write_byte(I2C.CMD_START)
 
-        assert(type(data) == type([]))
         if address is not None:
-            # Copy to a new 'data' object, do not modify the original
             data = [ address << 1 ] + data
 
-        if len(data):
-            assert(len(data) <= 16)
-            buf = self.bp.write_bytes([ I2C.CMD_WRITE_BYTES | (len(data) - 1) ] + data)
+        while len(data):
+            # If both START and STOP are True (default) and len(data) > 16
+            # -> use bulk transfer (BP command CMD_READ_WRITE_BULK)
+            # Else do it manually in max 16-Byte chunks
+            # -> BP CMD_WRITE_BYTES
+
+            data_chunk = data[:16]
+            del(data[:16])
+
+            buf = self.bp.write_bytes([ I2C.CMD_WRITE_BYTES | (len(data_chunk) - 1) ] + data_chunk)
             # Strip off confirmation of the length byte
-            buf = buf[1:]
+            ret += buf[1:]
+
         if stop:
             self.bp.write_byte(I2C.CMD_STOP)
-        return buf
+
+        return ret
 
     def scan_bus(self, min_addr = 0x08, max_addr = 0x77):
         """
